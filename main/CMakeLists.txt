@@ -5,6 +5,7 @@ idf_component_register(
          "ui_pixel_math.c"
          "tesla_identity.c"
          "tesla_identity_esp.c"
+         "tesla_pairing_state.c"
          "demo_display.c"
          "demo_button.c"
          "demo_audio.c"
