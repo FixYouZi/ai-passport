@@ -12,8 +12,8 @@ esp_err_t tesla_ble_name_from_vin(const char *vin,
         return ESP_ERR_INVALID_ARG;
     }
 
-    const int rc = mbedtls_sha1_ret((const unsigned char *)normalized,
-                               TESLA_VIN_LENGTH, digest);
+    const int rc = mbedtls_sha1((const unsigned char *)normalized,
+                                TESLA_VIN_LENGTH, digest);
     if (rc != 0) return ESP_FAIL;
 
     return tesla_ble_name_from_digest(digest, output) ? ESP_OK : ESP_FAIL;

@@ -91,6 +91,10 @@ run_static_checks() {
         -o "${test_dir}/test_tesla_identity"
     "${test_dir}/test_tesla_identity"
     "${CC:-cc}" -std=c11 -Wall -Wextra -Werror -Imain \
+        tests/test_tesla_proto.c main/tesla_proto.c \
+        -o "${test_dir}/test_tesla_proto"
+    "${test_dir}/test_tesla_proto"
+    "${CC:-cc}" -std=c11 -Wall -Wextra -Werror -Imain \
         tests/test_tesla_pairing_state.c main/tesla_pairing_state.c \
         -o "${test_dir}/test_tesla_pairing_state"
     "${test_dir}/test_tesla_pairing_state"

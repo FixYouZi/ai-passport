@@ -17,6 +17,45 @@ Store reusable font files and generated font sources in `fonts/`.
 - Check Flash and internal-RAM impact before adding a font; the ESP32-C3 has no PSRAM.
 - Do not commit fonts whose license does not permit redistribution.
 
+### Tesla card-key UI fonts
+
+[`fonts/tesla_symbols.txt`](fonts/tesla_symbols.txt) is the character inventory for
+the Tesla card-key application: ASCII `0x20-0x7E` plus every non-ASCII code point
+used in display string literals under `main/` (251 code points). The compiled
+sources `fonts/tesla_font_16.c`, `fonts/tesla_font_20.c`, and
+`fonts/tesla_font_26.c` were generated with `lv_font_conv` 1.5.3 from Microsoft
+YaHei Regular (face 0 of the system `msyh.ttc`). `fonts/tesla_font_lock.c` is a
+36 px subset with only the 11 characters used by the large lock-state label
+(minimal home layout, scheme C). The subset keeps flash usage small.
+**Microsoft YaHei is a
+proprietary Windows font and must not be redistributed**: the generated bitmap
+sources are for local/personal firmware only. Replace the source with Noto Sans SC
+(SIL OFL 1.1) before publishing a firmware image or this repository publicly.
+The font file itself is not committed; only the generated bitmap sources are.
+
+- Sizes and format: 16/20/26 px (full inventory) and 36 px (lock-state subset),
+  4 bpp, `--format lvgl --no-compress`, LVGL 9.
+- Generation (repeat for each size, bash syntax; `msyh-face0.ttf` is the face-0
+  extraction of `C:\Windows\Fonts\msyh.ttc`):
+
+  ```bash
+  lv_font_conv --font msyh-face0.ttf --range 0x20-0x7E \
+    --symbols "$(cat assets/fonts/tesla_symbols.txt)" --size 16 --bpp 4 \
+    --format lvgl --no-compress --lv-font-name tesla_font_16 \
+    --lv-include lvgl.h --output assets/fonts/tesla_font_16.c
+  ```
+
+  The lock subset uses `--size 36` with
+  `--symbols "$(cat assets/fonts/tesla_lock_symbols.txt)"`; extend that file when
+  the lock wording changes.
+
+- Destination: compiled into the `main` component and referenced as
+  `tesla_font_16/20/26` and `tesla_font_lock`.
+- Coverage gate: `python tools/check_glyphs.py` verifies every display literal is
+  covered after UI text changes. Regenerate the fonts when it fails.
+- Flash impact: the four sources total about 1.22 MB; the linked application image
+  is about 1.71 MB, leaving roughly 78 % of the 8 MB application partition free.
+
 ## Images
 
 Store reusable source images and generated display assets in `images/`.
@@ -27,6 +66,8 @@ Store reusable source images and generated display assets in `images/`.
 | [`images/readme-hardware-specs.png`](images/readme-hardware-specs.png) | 2172 × 724, PNG RGBA | Optional technical infographic retained as a reference asset; it is no longer used as the homepage hero. Generated for this repository with the built-in image generation tool on 2026-09-17; the six labels and values were checked against the documented hardware contract. |
 | [`images/logo-wordmark.png`](images/logo-wordmark.png) | 1648 × 336, PNG RGBA | Transparent black wordmark extracted from the repository's original `images/logo.png`; embedded in both project README files for light backgrounds. |
 | [`images/logo-wordmark-dark.png`](images/logo-wordmark-dark.png) | 1648 × 336, PNG RGBA | White version of the extracted wordmark, used by the README `<picture>` element when GitHub is in dark mode. |
+| [`images/car-model-3.png`](images/car-model-3.png) | 216 × 100, PNG RGB | Photoreal Model 3 front-view image for the Tesla card-key home screen. Generated from a front-view reference with the built-in image tool; the background is removed by brightness thresholding plus edge flood fill, the largest connected region keeps only the car (dropping the corner watermark), and the body is scaled to 96 px high and composited on the `#14181F` panel background. Converted to RGB565 (`car_model_3`) in [`main/car_art.c`](../main/car_art.c) and selected when the saved model is Model 3. |
+| [`images/car-model-y.png`](images/car-model-y.png) | 216 × 100, PNG RGB | Photoreal Model Y front-view image (taller body) for the same home screen, processed the same way and converted to `car_model_y`. Both images are static; the vehicle lock/closure status is shown in the text card above the image. |
 
 - Use descriptive names and document dimensions, pixel format, conversion steps, and destination.
 - Prefer formats suitable for the 240 × 320 RGB565 display and account for Flash and internal RAM.
