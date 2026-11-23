@@ -21,8 +21,10 @@ Store reusable font files and generated font sources in `fonts/`.
 
 [`fonts/tesla_symbols.txt`](fonts/tesla_symbols.txt) is the character inventory for
 the Tesla card-key application: ASCII `0x20-0x7E` plus every non-ASCII code point
-used in display string literals under `main/` (251 code points). The compiled
-sources `fonts/tesla_font_16.c`, `fonts/tesla_font_20.c`, and
+used in display string literals under `main/` and in runtime input such as
+license plates (all province abbreviations plus the special plate characters,
+300 code points). The compiled sources
+`fonts/tesla_font_16.c`, `fonts/tesla_font_20.c`, and
 `fonts/tesla_font_26.c` were generated with `lv_font_conv` 1.5.3 from Microsoft
 YaHei Regular (face 0 of the system `msyh.ttc`). `fonts/tesla_font_lock.c` is a
 36 px subset with only the 11 characters used by the large lock-state label
@@ -66,7 +68,7 @@ Store reusable source images and generated display assets in `images/`.
 | [`images/readme-hardware-specs.png`](images/readme-hardware-specs.png) | 2172 × 724, PNG RGBA | Optional technical infographic retained as a reference asset; it is no longer used as the homepage hero. Generated for this repository with the built-in image generation tool on 2026-09-17; the six labels and values were checked against the documented hardware contract. |
 | [`images/logo-wordmark.png`](images/logo-wordmark.png) | 1648 × 336, PNG RGBA | Transparent black wordmark extracted from the repository's original `images/logo.png`; embedded in both project README files for light backgrounds. |
 | [`images/logo-wordmark-dark.png`](images/logo-wordmark-dark.png) | 1648 × 336, PNG RGBA | White version of the extracted wordmark, used by the README `<picture>` element when GitHub is in dark mode. |
-| [`images/car-model-3.png`](images/car-model-3.png) | 216 × 100, PNG RGB | Photoreal Model 3 front-view image for the Tesla card-key home screen. Generated from a front-view reference with the built-in image tool; the background is removed by brightness thresholding plus edge flood fill, the largest connected region keeps only the car (dropping the corner watermark), and the body is scaled to 96 px high and composited on the `#14181F` panel background. Converted to RGB565 (`car_model_3`) in [`main/car_art.c`](../main/car_art.c) and selected when the saved model is Model 3. |
+| [`images/car-model-3.png`](images/car-model-3.png) | 216 × 100, PNG RGB | Photoreal 2024 Model 3 (Highland facelift, Standard/RWD) front-view image for the Tesla card-key home screen: slim horizontal headlamps, smooth badge-free nose, single wide lower intake. Generated from a front-view reference with the built-in image tool; the background is removed by brightness thresholding plus edge flood fill, the largest connected region keeps only the car (dropping the corner watermark), and the body is scaled to 96 px high and composited on the `#14181F` panel background. Converted to RGB565 (`car_model_3`) in [`main/car_art.c`](../main/car_art.c) and selected when the saved model is Model 3. |
 | [`images/car-model-y.png`](images/car-model-y.png) | 216 × 100, PNG RGB | Photoreal Model Y front-view image (taller body) for the same home screen, processed the same way and converted to `car_model_y`. Both images are static; the vehicle lock/closure status is shown in the text card above the image. |
 
 - Use descriptive names and document dimensions, pixel format, conversion steps, and destination.

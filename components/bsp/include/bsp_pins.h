@@ -58,10 +58,11 @@
 #define BSP_BTN_GPIO         0
 
 // 按键判定时序(ms):由 BSP 显式下发给 button 组件,不依赖它的 Kconfig 默认值。
-// 短按判定窗口 180ms 与组件默认一致,写在这里是为了和应用手感放在一起调;
+// 短按窗口同时决定双击间隔:组件在松手后等这么久没有第二次按下才发单击,
+// 因此它必须覆盖常见的双击间隔(200~300ms),180ms 会把双击拆成两次单击。
 // 长按组件默认 1500ms,要按住 1.5s 才触发,在这台三键小设备上明显偏迟钝,收敛到 500ms。
 // (组件对 BUTTON_LONG_PRESS_TIME_MS 的 Kconfig 下限同样是 500ms,想再短只能在代码里下发。)
-#define BSP_BTN_SHORT_PRESS_MS  180   // 短按(单击)判定窗口
+#define BSP_BTN_SHORT_PRESS_MS  350   // 短按判定窗口（同时是双击间隔窗口，180ms 太短易判成两次单击）
 #define BSP_BTN_LONG_PRESS_MS   500   // 长按触发时间
 
 // 按键锁(在电压解码层,早于 button 组件的事件判定):

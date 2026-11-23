@@ -263,6 +263,43 @@ size_t tesla_proto_info_status(uint8_t *out, size_t cap)
     return unsigned_message(1, request, pb.len, out, cap); // UnsignedMessage.InformationRequest = 1
 }
 
+size_t tesla_proto_charge_request(uint8_t *out, size_t cap)
+{
+    // CarServer.Action.vehicleAction = 2
+    //   VehicleAction.getVehicleData = 1
+    //     GetVehicleData.getChargeState = 2（空消息）
+    static const uint8_t vehicle_action[6] = {0x0a, 0x04, 0x12, 0x02, 0x12, 0x00};
+
+    tesla_pb_t pb;
+    tesla_pb_init(&pb, out, cap);
+    tesla_pb_bytes(&pb, 2, vehicle_action, sizeof(vehicle_action));
+    return pb.ok ? pb.len : 0;
+}
+
+size_t tesla_proto_flash_lights(uint8_t *out, size_t cap)
+{
+    // CarServer.Action.vehicleAction = 2
+    //   VehicleAction.vehicleControlFlashLightsAction = 26（空消息）
+    static const uint8_t vehicle_action[3] = {0xD2, 0x01, 0x00};
+
+    tesla_pb_t pb;
+    tesla_pb_init(&pb, out, cap);
+    tesla_pb_bytes(&pb, 2, vehicle_action, sizeof(vehicle_action));
+    return pb.ok ? pb.len : 0;
+}
+
+size_t tesla_proto_honk_horn(uint8_t *out, size_t cap)
+{
+    // CarServer.Action.vehicleAction = 2
+    //   VehicleAction.vehicleControlHonkHornAction = 27（空消息）
+    static const uint8_t vehicle_action[3] = {0xDA, 0x01, 0x00};
+
+    tesla_pb_t pb;
+    tesla_pb_init(&pb, out, cap);
+    tesla_pb_bytes(&pb, 2, vehicle_action, sizeof(vehicle_action));
+    return pb.ok ? pb.len : 0;
+}
+
 size_t tesla_proto_whitelist_add_key(const uint8_t pub[TESLA_PUBKEY_LEN], uint8_t form_factor,
                                      uint8_t *out, size_t cap)
 {
@@ -348,7 +385,7 @@ static size_t destination_routing(const uint8_t routing[TESLA_UUID_LEN], uint8_t
     return pb.ok ? pb.len : 0;
 }
 
-size_t tesla_proto_session_info_request(const uint8_t pub[TESLA_PUBKEY_LEN],
+size_t tesla_proto_session_info_request(uint8_t domain, const uint8_t pub[TESLA_PUBKEY_LEN],
                                         const uint8_t uuid[TESLA_UUID_LEN],
                                         const uint8_t routing[TESLA_UUID_LEN], uint8_t *out,
                                         size_t cap)
@@ -366,7 +403,7 @@ size_t tesla_proto_session_info_request(const uint8_t pub[TESLA_PUBKEY_LEN],
     }
     request_len = pb.len;
 
-    size_t to_len = destination_domain(TESLA_DOMAIN_VCSEC, to_dest, sizeof(to_dest));
+    size_t to_len = destination_domain(domain, to_dest, sizeof(to_dest));
     size_t from_len = destination_routing(routing, from_dest, sizeof(from_dest));
     if (to_len == 0 || from_len == 0) {
         return 0;
@@ -380,8 +417,9 @@ size_t tesla_proto_session_info_request(const uint8_t pub[TESLA_PUBKEY_LEN],
     return pb.ok ? pb.len : 0;
 }
 
-size_t tesla_proto_encrypted_envelope(const uint8_t pub[TESLA_PUBKEY_LEN], const tesla_gcm_sig_t *sig,
-                                      const uint8_t *ciphertext, size_t ciphertext_len,
+size_t tesla_proto_encrypted_envelope(uint8_t domain, const uint8_t pub[TESLA_PUBKEY_LEN],
+                                      const tesla_gcm_sig_t *sig, const uint8_t *ciphertext,
+                                      size_t ciphertext_len,
                                       const uint8_t routing[TESLA_UUID_LEN],
                                       const uint8_t uuid[TESLA_UUID_LEN], uint32_t flags, uint8_t *out,
                                       size_t cap)
@@ -422,7 +460,7 @@ size_t tesla_proto_encrypted_envelope(const uint8_t pub[TESLA_PUBKEY_LEN], const
     }
     signature_len = pb.len;
 
-    size_t to_len = destination_domain(TESLA_DOMAIN_VCSEC, to_dest, sizeof(to_dest));
+    size_t to_len = destination_domain(domain, to_dest, sizeof(to_dest));
     size_t from_len = destination_routing(routing, from_dest, sizeof(from_dest));
     if (to_len == 0 || from_len == 0) {
         return 0;
@@ -898,4 +936,81 @@ bool tesla_proto_parse_vcsec(const uint8_t *buf, size_t len, tesla_vcsec_status_
         }
     }
     return true;
+}
+
+// CarServer.Response.vehicleData = 2 → VehicleData.chargeState = 3
+// ChargeState.battery_level = 114（int32），usable_battery_level = 115。
+static bool parse_charge_state(cursor_t *cur, int *percent)
+{
+    int value = -1;
+    while (cur->p < cur->end) {
+        uint32_t field = 0;
+        uint8_t wire = 0;
+        if (!read_tag(cur, &field, &wire)) {
+            return false;
+        }
+        if ((field == 114 || field == 115) && wire == WIRE_VARINT) {
+            uint64_t v = 0;
+            if (!read_varint(cur, &v)) {
+                return false;
+            }
+            if (field == 114 || value < 0) {
+                value = (int)v;
+            }
+        } else if (!skip_field(cur, wire)) {
+            return false;
+        }
+    }
+    if (value < 0 || value > 100) {
+        return false;
+    }
+    *percent = value;
+    return true;
+}
+
+bool tesla_proto_parse_charge_state(const uint8_t *buf, size_t len, int *percent)
+{
+    if (buf == NULL || percent == NULL) {
+        return false;
+    }
+    cursor_t cur = {buf, buf + len};
+    while (cur.p < cur.end) {
+        uint32_t field = 0;
+        uint8_t wire = 0;
+        if (!read_tag(&cur, &field, &wire)) {
+            return false;
+        }
+        if (field == 2 && wire == WIRE_BYTES) {
+            const uint8_t *data = NULL;
+            size_t size = 0;
+            if (!read_bytes(&cur, &data, &size)) {
+                return false;
+            }
+            cursor_t vehicle_data = {data, data + size};
+            while (vehicle_data.p < vehicle_data.end) {
+                uint32_t vf = 0;
+                uint8_t vw = 0;
+                if (!read_tag(&vehicle_data, &vf, &vw)) {
+                    return false;
+                }
+                if (vf == 3 && vw == WIRE_BYTES) {
+                    const uint8_t *cs = NULL;
+                    size_t cs_len = 0;
+                    if (!read_bytes(&vehicle_data, &cs, &cs_len)) {
+                        return false;
+                    }
+                    cursor_t charge = {cs, cs + cs_len};
+                    return parse_charge_state(&charge, percent);
+                }
+                if (!skip_field(&vehicle_data, vw)) {
+                    return false;
+                }
+            }
+            return false;
+        }
+        if (!skip_field(&cur, wire)) {
+            return false;
+        }
+    }
+    return false;
 }

@@ -127,7 +127,7 @@ size_t tesla_proto_vcsec_envelope(const uint8_t *unsigned_msg, size_t len, uint8
                                   uint8_t *out, size_t cap);
 
 // ---- RoutableMessage 信封 ----
-size_t tesla_proto_session_info_request(const uint8_t pub[TESLA_PUBKEY_LEN],
+size_t tesla_proto_session_info_request(uint8_t domain, const uint8_t pub[TESLA_PUBKEY_LEN],
                                         const uint8_t uuid[TESLA_UUID_LEN],
                                         const uint8_t routing[TESLA_UUID_LEN], uint8_t *out,
                                         size_t cap);
@@ -143,11 +143,22 @@ typedef struct {
     size_t tag_len;
 } tesla_gcm_sig_t;
 
-size_t tesla_proto_encrypted_envelope(const uint8_t pub[TESLA_PUBKEY_LEN], const tesla_gcm_sig_t *sig,
-                                      const uint8_t *ciphertext, size_t ciphertext_len,
+size_t tesla_proto_encrypted_envelope(uint8_t domain, const uint8_t pub[TESLA_PUBKEY_LEN],
+                                      const tesla_gcm_sig_t *sig, const uint8_t *ciphertext,
+                                      size_t ciphertext_len,
                                       const uint8_t routing[TESLA_UUID_LEN],
                                       const uint8_t uuid[TESLA_UUID_LEN], uint32_t flags, uint8_t *out,
                                       size_t cap);
+
+// ---- 信息娱乐域（车机电量）----
+// CarServer.Action { vehicleAction { getVehicleData { getChargeState } } }
+size_t tesla_proto_charge_request(uint8_t *out, size_t cap);
+// CarServer.Action { vehicleAction { vehicleControlFlashLightsAction } }
+size_t tesla_proto_flash_lights(uint8_t *out, size_t cap);
+// CarServer.Action { vehicleAction { vehicleControlHonkHornAction } }
+size_t tesla_proto_honk_horn(uint8_t *out, size_t cap);
+// 解析 CarServer.Response.vehicleData.chargeState，输出剩余电量百分比（0..100）。
+bool tesla_proto_parse_charge_state(const uint8_t *data, size_t len, int *percent);
 
 // ---- 解析 ----
 typedef struct {

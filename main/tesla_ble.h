@@ -10,7 +10,7 @@
 
 #include "esp_err.h"
 
-#define TESLA_BLE_ACTION_COUNT 6
+#define TESLA_BLE_ACTION_COUNT 7
 
 typedef enum {
     TESLA_CMD_UNLOCK = 0,
@@ -19,6 +19,7 @@ typedef enum {
     TESLA_CMD_TRUNK,
     TESLA_CMD_TRUNK_CLOSE,
     TESLA_CMD_STATUS,
+    TESLA_CMD_FIND,
 } tesla_cmd_t;
 
 typedef enum {
@@ -75,6 +76,7 @@ typedef struct {
     int8_t rssi;
     int last_error;
     uint16_t detail;
+    int charge;        // 车机剩余电量百分比，-1 表示未知
     char vehicle_name[19];
 } tesla_ble_status_t;
 
@@ -122,6 +124,10 @@ esp_err_t tesla_ble_discover_start(void);
 void tesla_ble_discover_stop(void);
 // 复制当前发现的广播列表（按发现顺序），返回条数。
 int tesla_ble_discover_list(tesla_ble_peer_t *out, int max);
+// 读取车机剩余电量（需已连接且本机钥匙已授权），成功返回 TESLA_OK。
+int tesla_ble_read_charge(int *percent);
+// 最近一次读取到的车机电量，未知为 -1。
+int tesla_ble_get_charge(void);
 // 丢弃本机静态密钥并断开连接；下次使用会生成新密钥，需要重新授权。
 esp_err_t tesla_ble_reset_key(void);
 void tesla_ble_disconnect(void);

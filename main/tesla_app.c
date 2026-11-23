@@ -104,13 +104,15 @@ enum {
     ACT_TRUNK_CLOSE,
     ACT_PAIR,
     ACT_STATUS,
+    ACT_FIND,
 };
 
 static const char *SETTINGS_TITLES[6] = {"车辆信息", "蓝牙钥匙授权", "热点配置", "关于本机",
                                          "清空车辆信息", "重置蓝牙密钥"};
 static const char *SETTINGS_GLYPHS[6] = {"车", "钥", "热", "关", "清", "重"};
-static const char *RUNNING_TITLES[7] = {"解锁车辆", "上锁车辆", "打开前备箱", "打开后备箱",
-                                        "关闭后备箱", "蓝牙钥匙授权", "读取车辆状态"};
+static const char *RUNNING_TITLES[8] = {"解锁车辆", "上锁车辆", "打开前备箱", "打开后备箱",
+                                        "关闭后备箱", "蓝牙钥匙授权", "读取车辆状态",
+                                        "寻找车辆"};
 
 static lv_obj_t *s_root;
 static page_t s_page;
@@ -144,6 +146,7 @@ static volatile bool s_sleep_armed;
 static int64_t s_last_activity;
 static int64_t s_away_since;
 static int64_t s_sleep_retry;
+static int64_t s_auto_status_us;
 static bool s_was_connected;
 
 enum {
@@ -210,33 +213,6 @@ static const char *ble_state_text(void)
     case TESLA_BLE_READY: return "正在发送命令";
     default: return s_busy ? "正在准备" : "准备就绪";
     }
-}
-
-static const char *link_short_text(void)
-{
-    if (!s_ble.initialized) {
-        return "未就绪";
-    }
-    if (s_busy) {
-        switch (s_ble.state) {
-        case TESLA_BLE_SCANNING: return "搜索中";
-        case TESLA_BLE_CONNECTING: return "连接中";
-        case TESLA_BLE_HANDSHAKE: return "握手中";
-        case TESLA_BLE_READY: return "发送中";
-        case TESLA_BLE_PAIRING: return "授权中";
-        default: return "准备中";
-        }
-    }
-    if (s_config.vin[0] == '\0') {
-        return "待配置";
-    }
-    if (s_ble.connected && s_ble.authorized) {
-        return "已授权";
-    }
-    if (s_ble.connected) {
-        return "未授权";
-    }
-    return "待命";
 }
 
 static void build_header(const char *title)
@@ -320,13 +296,13 @@ static const char *lock_state_text(uint8_t state)
 }
 
 // 主界面状态行：16 px 下单行宽度不超过 208 px，最长文案为
-// “前备箱开 · 信号 -100 dBm”，无需换行。
+// “前备箱开”，无需换行。信号强度只在授权页展示。
 static void vehicle_status_line(char *out, size_t cap, uint32_t *color)
 {
     tesla_vehicle_status_t vehicle;
     tesla_ble_get_vehicle_status(&vehicle);
     if (!vehicle.valid) {
-        snprintf(out, cap, "按 OK 读取状态");
+        snprintf(out, cap, "状态未知");
         *color = C_MUTED;
         return;
     }
@@ -356,6 +332,22 @@ static void vehicle_status_line(char *out, size_t cap, uint32_t *color)
     }
 }
 
+// 车机电量图标：外壳 + 正极 + 按比例填充，颜色与百分比文字一致。
+static void build_car_battery_icon(lv_obj_t *parent, int x, int y, int percent, uint32_t color)
+{
+    make_box(parent, x, y, 24, 14, color, 3);
+    make_box(parent, x + 2, y + 2, 20, 10, C_BG, 1);
+    make_box(parent, x + 24, y + 4, 3, 6, color, 1);
+    if (percent < 0) {
+        return;
+    }
+    const int value = percent > 100 ? 100 : percent;
+    const int width = (18 * value + 50) / 100;
+    if (width > 0) {
+        make_box(parent, x + 3, y + 3, width, 8, color, 1);
+    }
+}
+
 static void build_main(void)
 {
     // 方案 C · 极简大字：不用卡片边框，只靠字号与留白建立层级。
@@ -368,13 +360,9 @@ static void build_main(void)
     make_box(s_root, 16, 20, 6, 6, link_color, LV_RADIUS_CIRCLE);
 
     char line[96];
-    if (s_config.vin[0] == '\0') {
-        snprintf(line, sizeof(line), "未录入车辆 · 待配置");
-    } else {
-        snprintf(line, sizeof(line), "%s · %s", s_config.model[0] ? s_config.model : "特斯拉",
-                 link_short_text());
-    }
-    make_label(s_root, 26, 10, 148, line, &tesla_font_16, C_MUTED);
+    // 顶部左侧显示车牌号；未配置时给出明确提示。
+    make_label(s_root, 26, 10, 148, s_config.plate[0] ? s_config.plate : "未配置车牌",
+               &tesla_font_16, C_MUTED);
 
     uint32_t battery_color = C_MUTED;
     if (s_battery >= 0 && s_battery <= 15) {
@@ -404,32 +392,120 @@ static void build_main(void)
         status_color = C_MUTED;
     } else {
         vehicle_status_line(line, sizeof(line), &status_color);
-        if (vehicle.valid && s_ble.connected && s_ble.rssi != 0) {
-            snprintf(line + strlen(line), sizeof(line) - strlen(line), " · 信号 %d dBm",
-                     s_ble.rssi);
-        }
     }
     make_label(s_root, 16, 100, 208, line, &tesla_font_16, status_color);
 
     // 车型图：整幅深色横带，无圆角。
-    make_box(s_root, 0, 132, SCREEN_W, 108, 0x14181F, 0);
+    make_box(s_root, 0, 124, SCREEN_W, 106, 0x14181F, 0);
     const lv_image_dsc_t *art =
         strstr(s_config.model, "Y") != NULL ? &car_model_y : &car_model_3;
     lv_obj_t *car = lv_image_create(s_root);
     lv_image_set_src(car, art);
-    lv_obj_set_pos(car, 12, 136);
+    lv_obj_set_pos(car, 12, 127);
     lv_obj_remove_flag(car, LV_OBJ_FLAG_SCROLLABLE);
 
-    make_box(s_root, 16, 252, 36, 3, C_RED, 2);
-    lv_obj_t *hint = make_label(s_root, 0, 266, SCREEN_W, "上键 单击锁车 · 双击解锁",
+    // 车机电量：电池图标 + 百分比，不再显示“车辆”二字。
+    uint32_t car_color = C_MUTED;
+    if (s_ble.charge >= 0 && s_ble.charge <= 15) {
+        car_color = C_RED;
+    } else if (s_ble.charge >= 0 && s_ble.charge <= 30) {
+        car_color = C_AMBER;
+    } else if (s_ble.charge > 30) {
+        car_color = C_GREEN;
+    }
+    build_car_battery_icon(s_root, 150, 238, s_ble.charge, car_color);
+    if (s_ble.charge >= 0) {
+        snprintf(line, sizeof(line), "%d%%", s_ble.charge);
+    } else {
+        strcpy(line, "--");
+    }
+    lv_obj_t *soc = make_label(s_root, 178, 234, 46, line, &tesla_font_16, car_color);
+    lv_obj_set_style_text_align(soc, LV_TEXT_ALIGN_RIGHT, 0);
+
+    lv_obj_t *hint = make_label(s_root, 0, 256, SCREEN_W, "上键 单击锁车 / 长按解锁",
                                 &tesla_font_16, 0xC9D1DC);
     lv_obj_set_style_text_align(hint, LV_TEXT_ALIGN_CENTER, 0);
-    hint = make_label(s_root, 0, 288, SCREEN_W, "下键 单击尾门 · 双击关", &tesla_font_16,
+    hint = make_label(s_root, 0, 276, SCREEN_W, "下键 单击尾门 / 长按关尾门", &tesla_font_16,
+                      0xC9D1DC);
+    lv_obj_set_style_text_align(hint, LV_TEXT_ALIGN_CENTER, 0);
+    hint = make_label(s_root, 0, 296, SCREEN_W, "OK 单击寻车 / 长按设置", &tesla_font_16,
                       0xC9D1DC);
     lv_obj_set_style_text_align(hint, LV_TEXT_ALIGN_CENTER, 0);
 }
 
-static void build_tile(int x, int y, const char *glyph, const char *title, bool selected)
+static lv_obj_t *make_outline(lv_obj_t *parent, int x, int y, int w, int h, int radius,
+                              uint32_t color, int width)
+{
+    lv_obj_t *box = lv_obj_create(parent);
+    lv_obj_set_pos(box, x, y);
+    lv_obj_set_size(box, w, h);
+    lv_obj_set_style_bg_opa(box, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_radius(box, radius, 0);
+    lv_obj_set_style_border_width(box, width, 0);
+    lv_obj_set_style_border_color(box, lv_color_hex(color), 0);
+    lv_obj_set_style_pad_all(box, 0, 0);
+    lv_obj_remove_flag(box, LV_OBJ_FLAG_SCROLLABLE);
+    return box;
+}
+
+typedef enum {
+    TILE_ICON_CAR = 0,
+    TILE_ICON_KEY,
+    TILE_ICON_WIFI,
+    TILE_ICON_INFO,
+} tile_icon_t;
+
+// 设置磁贴图标：用基础图元绘制，避免依赖图标字库。
+static void build_tile_icon(lv_obj_t *icon, tile_icon_t kind, uint32_t color)
+{
+    switch (kind) {
+    case TILE_ICON_CAR:
+        make_box(icon, 10, 7, 16, 8, color, 4);    // 车顶
+        make_box(icon, 5, 11, 26, 11, color, 6);   // 车身
+        make_box(icon, 8, 20, 7, 7, color, 3);     // 左轮
+        make_box(icon, 21, 20, 7, 7, color, 3);    // 右轮
+        break;
+    case TILE_ICON_KEY:
+        make_outline(icon, 4, 10, 14, 14, 7, color, 3);  // 钥匙环
+        make_box(icon, 17, 15, 13, 3, color, 2);         // 钥匙杆
+        make_box(icon, 25, 18, 3, 5, color, 1);          // 齿
+        make_box(icon, 21, 18, 3, 4, color, 1);          // 齿
+        break;
+    case TILE_ICON_WIFI: {
+        static const struct {
+            int x;
+            int y;
+            int size;
+        } ARCS[3] = {{13, 21, 10}, {9, 17, 18}, {5, 13, 26}};
+        for (int i = 0; i < 3; i++) {
+            lv_obj_t *arc = lv_arc_create(icon);
+            lv_obj_set_pos(arc, ARCS[i].x, ARCS[i].y);
+            lv_obj_set_size(arc, ARCS[i].size, ARCS[i].size);
+            lv_obj_remove_flag(arc, LV_OBJ_FLAG_CLICKABLE);
+            lv_obj_set_style_bg_opa(arc, LV_OPA_TRANSP, 0);
+            lv_obj_set_style_arc_width(arc, 3, LV_PART_MAIN);
+            lv_obj_set_style_arc_color(arc, lv_color_hex(color), LV_PART_MAIN);
+            lv_obj_set_style_arc_opa(arc, LV_OPA_TRANSP, LV_PART_INDICATOR);
+            lv_obj_set_style_opa(arc, LV_OPA_TRANSP, LV_PART_KNOB);
+            lv_arc_set_rotation(arc, 0);
+            lv_arc_set_bg_angles(arc, 220, 320);
+            lv_arc_set_angles(arc, 220, 220);
+        }
+        make_box(icon, 15, 23, 6, 6, color, 3);  // 原点
+        break;
+    }
+    case TILE_ICON_INFO:
+    default: {
+        make_outline(icon, 3, 3, 30, 30, 15, color, 3);  // 圆形信息
+        lv_obj_t *mark = make_label(icon, 0, 0, 36, "i", &tesla_font_20, color);
+        lv_obj_set_style_text_align(mark, LV_TEXT_ALIGN_CENTER, 0);
+        lv_obj_align(mark, LV_ALIGN_CENTER, 0, -1);
+        break;
+    }
+    }
+}
+
+static void build_tile(int x, int y, tile_icon_t kind, const char *title, bool selected)
 {
     lv_obj_t *tile = make_box(s_root, x, y, 104, 68, selected ? C_CARD_SEL_TOP : C_CARD_TOP, 12);
     lv_obj_set_style_bg_grad_color(tile, lv_color_hex(selected ? C_CARD_SEL_BOT : C_CARD_BOT), 0);
@@ -439,12 +515,16 @@ static void build_tile(int x, int y, const char *glyph, const char *title, bool 
         lv_obj_set_style_border_color(tile, lv_color_hex(C_BORDER), 0);
         make_box(tile, 0, 22, 3, 24, C_RED, 2);
     }
-    lv_obj_t *icon = make_box(tile, 37, 7, 30, 30, selected ? 0x333B47 : C_STROKE, 9);
-    lv_obj_t *mark = make_label(icon, 0, 0, 30, glyph, &tesla_font_20, C_TEXT);
-    lv_obj_set_style_text_align(mark, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_align(mark, LV_ALIGN_CENTER, 0, 0);
+    lv_obj_t *icon = lv_obj_create(tile);
+    lv_obj_set_pos(icon, 34, 4);
+    lv_obj_set_size(icon, 36, 36);
+    lv_obj_set_style_bg_opa(icon, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(icon, 0, 0);
+    lv_obj_set_style_pad_all(icon, 0, 0);
+    lv_obj_remove_flag(icon, LV_OBJ_FLAG_SCROLLABLE);
+    build_tile_icon(icon, kind, selected ? C_TEXT : 0xC9D1DC);
 
-    lv_obj_t *label = make_label(tile, 0, 43, 104, title, &tesla_font_16,
+    lv_obj_t *label = make_label(tile, 0, 42, 104, title, &tesla_font_16,
                                  selected ? C_TEXT : 0xC9D1DC);
     lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_CENTER, 0);
 }
@@ -455,7 +535,7 @@ static void build_settings(void)
     for (int i = 0; i < 4; i++) {
         int x = (i % 2 == 0) ? 12 : 124;
         int y = 58 + (i / 2) * 76;
-        build_tile(x, y, SETTINGS_GLYPHS[i], SETTINGS_TITLES[i], i == s_selected);
+        build_tile(x, y, (tile_icon_t)i, SETTINGS_TITLES[i], i == s_selected);
     }
     build_row(208, 38, SETTINGS_GLYPHS[4], SETTINGS_TITLES[4], s_selected == 4, NULL,
               &tesla_font_16, true);
@@ -622,7 +702,7 @@ static int running_progress(void)
 
 static void build_running(void)
 {
-    build_header(RUNNING_TITLES[s_action < 7 ? s_action : 0]);
+    build_header(RUNNING_TITLES[s_action < 8 ? s_action : 0]);
     lv_obj_t *label = make_label(s_root, 16, 100, 208, ble_state_text(), &tesla_font_20, C_TEXT);
     lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_CENTER, 0);
 
@@ -719,9 +799,28 @@ static const char *whitelist_text(uint32_t code)
     }
 }
 
+// GATT 初始化失败：detail 低 4 位=阶段（1 服务 2 特征 3 订阅 4 断开），高 8 位=错误码。
+static const char *setup_text(uint16_t detail)
+{
+    static char buf[80];
+    uint8_t stage = (uint8_t)(detail & 0x0f);
+    uint8_t code = (uint8_t)(detail >> 4);
+    switch (stage) {
+    case 1: snprintf(buf, sizeof(buf), "未找到特斯拉服务(e=%u)", code); break;
+    case 2: snprintf(buf, sizeof(buf), "未找到车辆数据通道(e=%u)", code); break;
+    case 3: snprintf(buf, sizeof(buf), "订阅车辆通知失败(e=%u)", code); break;
+    case 4: snprintf(buf, sizeof(buf), "车辆断开连接(r=%u)", code); break;
+    default: snprintf(buf, sizeof(buf), "车辆服务初始化失败(e=%u)", code); break;
+    }
+    return buf;
+}
+
 static const char *error_text(int err, uint16_t detail, bool pairing)
 {
-    const char *specific = pairing ? whitelist_text(detail) : fault_text(detail);
+    const char *specific = NULL;
+    if (err != TESLA_ERR_SETUP) {
+        specific = pairing ? whitelist_text(detail) : fault_text(detail);
+    }
     if (specific != NULL) {
         return specific;
     }
@@ -731,7 +830,7 @@ static const char *error_text(int err, uint16_t detail, bool pairing)
     case TESLA_ERR_INIT: return "蓝牙未初始化，请重启设备";
     case TESLA_ERR_SCAN_TIMEOUT: return "未搜索到车辆。请确认车辆蓝牙已唤醒并靠近车辆";
     case TESLA_ERR_CONNECT: return "连接车辆失败，请靠近车辆后重试";
-    case TESLA_ERR_SETUP: return "车辆服务发现失败，请重试";
+    case TESLA_ERR_SETUP: return setup_text(detail);
     case TESLA_ERR_TX: return "发送命令失败，请重试";
     case TESLA_ERR_TIMEOUT: return "车辆未响应，请重试";
     case TESLA_ERR_PROTO: return "车辆响应格式异常";
@@ -776,12 +875,15 @@ static void finish_action(uint8_t action, int err, uint32_t lock, bool has_lock)
         case ACT_FRUNK: title = "前备箱已打开"; break;
         case ACT_TRUNK: title = "后备箱已打开"; break;
         case ACT_PAIR: title = "蓝牙钥匙已授权"; break;
+        case ACT_FIND: title = "寻车指令已发送"; break;
         default: break;
         }
         if (has_lock) {
             snprintf(detail, sizeof(detail), "当前车锁状态：%s", lock == 1 ? "已锁定" : "已解锁");
         } else if (action == ACT_PAIR) {
             snprintf(detail, sizeof(detail), "车辆已把本机加入钥匙白名单");
+        } else if (action == ACT_FIND) {
+            snprintf(detail, sizeof(detail), "车辆正在闪灯并鸣笛");
         } else {
             snprintf(detail, sizeof(detail), "车辆已确认执行该操作");
         }
@@ -903,12 +1005,25 @@ static void apply_confirm(void)
 
 static void handle_key(bsp_btn_t btn, bsp_btn_ev_t ev)
 {
-    if (ev == BSP_BTN_LONG && btn == BSP_BTN_OK) {
+    if (ev == BSP_BTN_LONG) {
+        // 主页长按：上键解锁、下键关尾门、OK 进入设置菜单。
+        if (s_page == PAGE_MAIN) {
+            if (btn == BSP_BTN_UP) {
+                start_action(ACT_UNLOCK);
+            } else if (btn == BSP_BTN_DOWN) {
+                start_action(ACT_TRUNK_CLOSE);
+            } else if (btn == BSP_BTN_OK) {
+                // OK 长按进入设置菜单；单击留给寻车。
+                s_page = PAGE_SETTINGS;
+                s_selected = 0;
+                s_dirty = true;
+            }
+            return;
+        }
+        if (btn != BSP_BTN_OK) {
+            return;
+        }
         switch (s_page) {
-        case PAGE_MAIN:
-            s_page = PAGE_SETTINGS;
-            s_selected = 0;
-            break;
         case PAGE_CONFIRM:
             s_page = PAGE_SETTINGS;
             break;
@@ -940,14 +1055,14 @@ static void handle_key(bsp_btn_t btn, bsp_btn_ev_t ev)
 
     switch (s_page) {
     case PAGE_MAIN:
-        // 主页快捷键：上单击锁车、上双击解锁；下单击开尾门、下双击关尾门；
-        // OK 单击读取车辆状态。
-        if (btn == BSP_BTN_UP) {
-            start_action(ev == BSP_BTN_DOUBLE ? ACT_UNLOCK : ACT_LOCK);
-        } else if (btn == BSP_BTN_DOWN) {
-            start_action(ev == BSP_BTN_DOUBLE ? ACT_TRUNK_CLOSE : ACT_TRUNK);
-        } else if (btn == BSP_BTN_OK) {
-            start_action(ACT_STATUS);
+        // 主页快捷键：上单击锁车；下单击开尾门；OK 单击寻车。
+        // 长按已在上方处理（解锁 / 关尾门 / 进入设置）。
+        if (btn == BSP_BTN_UP && ev == BSP_BTN_CLICK) {
+            start_action(ACT_LOCK);
+        } else if (btn == BSP_BTN_DOWN && ev == BSP_BTN_CLICK) {
+            start_action(ACT_TRUNK);
+        } else if (btn == BSP_BTN_OK && ev == BSP_BTN_CLICK) {
+            start_action(ACT_FIND);
         }
         break;
     case PAGE_SETTINGS:
@@ -1176,6 +1291,13 @@ static void ui_tick(lv_timer_t *timer)
         }
     }
 
+    // 主页停留期间每分钟刷新一次车辆状态与电量，保证电量信息不至于长期陈旧。
+    if (s_page == PAGE_MAIN && s_screen_on && !s_busy && status.connected && status.authorized &&
+        now - s_auto_status_us >= 60LL * 1000 * 1000) {
+        s_auto_status_us = now;
+        start_action(ACT_STATUS);
+    }
+
     if (s_wake_request) {
         s_wake_request = false;
         if (!s_screen_on) {
@@ -1237,10 +1359,21 @@ static void action_task(void *arg)
         if (item.action == ACT_PAIR) {
             err = tesla_ble_pair_peer(item.addr, item.addr_type);
         } else {
-            // ACT_STATUS 的枚举值与 TESLA_CMD_* 不连续，需要单独映射。
-            tesla_cmd_t cmd =
-                item.action == ACT_STATUS ? TESLA_CMD_STATUS : (tesla_cmd_t)item.action;
+            // ACT_STATUS / ACT_FIND 的枚举值与 TESLA_CMD_* 不连续，需要单独映射。
+            tesla_cmd_t cmd;
+            if (item.action == ACT_STATUS) {
+                cmd = TESLA_CMD_STATUS;
+            } else if (item.action == ACT_FIND) {
+                cmd = TESLA_CMD_FIND;
+            } else {
+                cmd = (tesla_cmd_t)item.action;
+            }
             err = tesla_ble_execute(cmd, &lock);
+            if (item.action == ACT_STATUS && err == TESLA_OK) {
+                // 状态查询已建立会话，顺便刷新车机电量。
+                int percent = -1;
+                (void)tesla_ble_read_charge(&percent);
+            }
         }
         ui_event_t event = {
             .kind = EVT_RESULT,
@@ -1272,7 +1405,7 @@ void tesla_app_key(bsp_btn_t btn, bsp_btn_ev_t ev)
         }
         return;
     }
-    if (ev != BSP_BTN_CLICK && ev != BSP_BTN_LONG) {
+    if (ev != BSP_BTN_CLICK && ev != BSP_BTN_LONG && ev != BSP_BTN_DOUBLE) {
         return;
     }
     ui_event_t event = {.kind = EVT_KEY, .btn = btn, .ev = ev};

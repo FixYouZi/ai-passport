@@ -105,7 +105,8 @@ static void test_session_info_request(void)
     memset(routing, 0x22, sizeof(routing));
 
     uint8_t out[256];
-    size_t len = tesla_proto_session_info_request(pub, uuid, routing, out, sizeof(out));
+    size_t len = tesla_proto_session_info_request(TESLA_DOMAIN_VCSEC, pub, uuid, routing, out,
+                                                  sizeof(out));
     assert(len == 112);
 
     // to_destination = 6 { domain = VCSEC(2) }
@@ -270,11 +271,30 @@ static void test_parse_vcsec_status(void)
     assert(status.command_fault == 1);
 }
 
+static void test_find_car_encoding(void)
+{
+    uint8_t out[8];
+
+    size_t len = tesla_proto_flash_lights(out, sizeof(out));
+    assert(len == 5);
+    const uint8_t flash[] = {0x12, 0x03, 0xD2, 0x01, 0x00};
+    assert(memcmp(out, flash, sizeof(flash)) == 0);
+
+    len = tesla_proto_honk_horn(out, sizeof(out));
+    assert(len == 5);
+    const uint8_t honk[] = {0x12, 0x03, 0xDA, 0x01, 0x00};
+    assert(memcmp(out, honk, sizeof(honk)) == 0);
+
+    assert(tesla_proto_flash_lights(out, 4) == 0);
+    assert(tesla_proto_honk_horn(NULL, sizeof(out)) == 0);
+}
+
 int main(void)
 {
     test_rke_encoding();
     test_closure_encoding();
     test_status_encoding();
+    test_find_car_encoding();
     test_whitelist_add_key();
     test_vcsec_envelope();
     test_session_info_request();

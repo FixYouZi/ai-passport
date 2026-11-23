@@ -18,7 +18,8 @@
 ### 特斯拉卡片钥匙界面字库
 
 [`fonts/tesla_symbols.txt`](fonts/tesla_symbols.txt) 是特斯拉卡片钥匙应用的字符清单：
-ASCII `0x20-0x7E` 加上 `main/` 下所有显示字符串字面量中的非 ASCII 码点（共 251 个）。
+ASCII `0x20-0x7E` 加上 `main/` 下所有显示字符串字面量中的非 ASCII 码点，以及车牌号这类
+运行时输入的字符（省级简称与「使领警学港澳挂」，共 300 个）。
 `fonts/tesla_font_16.c`、`fonts/tesla_font_20.c`、`fonts/tesla_font_26.c` 由
 `lv_font_conv` 1.5.3 基于微软雅黑 Regular 生成（系统 `msyh.ttc` 的 face 0）。
 `fonts/tesla_font_lock.c` 是 36 px 子集，只包含主页大字号锁车状态用到的 11 个汉字
@@ -57,7 +58,7 @@ ASCII `0x20-0x7E` 加上 `main/` 下所有显示字符串字面量中的非 ASCI
 | [`images/readme-hardware-specs.png`](images/readme-hardware-specs.png) | 2172 × 724，PNG RGBA | 保留为可选技术参考图，不再用于首页主视觉。于 2026-09-17 使用内置图像生成工具为本仓库生成；已根据文档中的硬件能力契约核对图中的六项标签与参数。 |
 | [`images/logo-wordmark.png`](images/logo-wordmark.png) | 1648 × 336，PNG RGBA | 从仓库原始 `images/logo.png` 中精确裁切并去除背景的黑色字标；用于中英文项目 README 的浅色主题。 |
 | [`images/logo-wordmark-dark.png`](images/logo-wordmark-dark.png) | 1648 × 336，PNG RGBA | 提取字标的白色版本；README 使用 `<picture>` 在 GitHub 深色主题下显示。 |
-| [`images/car-model-3.png`](images/car-model-3.png) | 216 × 100，PNG RGB | 卡片钥匙主页的 Model 3 写实车头正面图。用内置图像生成工具按实车正面出图，再以亮度阈值加四角泛洪去除背景，只保留最大连通区域（车身）以剔除角落水印，车身等比缩到 96 px 高后合成到 `#14181F` 面板底色上；转换为 RGB565（`car_model_3`）存入 [`main/car_art.c`](../main/car_art.c)，配置车型为 Model 3 时显示。 |
+| [`images/car-model-3.png`](images/car-model-3.png) | 216 × 100，PNG RGB | 卡片钥匙主页的 2024 款 Model 3（焕新版，后轮驱动标准版）写实车头正面图：细长水平大灯、无前标平滑车头、单条下部进气口。用内置图像生成工具按实车正面出图，再以亮度阈值加四角泛洪去除背景，只保留最大连通区域（车身）以剔除角落水印，车身等比缩到 96 px 高后合成到 `#14181F` 面板底色上；转换为 RGB565（`car_model_3`）存入 [`main/car_art.c`](../main/car_art.c)，配置车型为 Model 3 时显示。 |
 | [`images/car-model-y.png`](images/car-model-y.png) | 216 × 100，PNG RGB | 同一主页使用的 Model Y 写实车头正面图（车身更高），处理方式相同，转换为 `car_model_y`；配置车型为 Model Y 时显示。两张图均为静态图，锁车与车门状态显示在图片上方的文字卡片中。 |
 
 - 使用描述性命名，并记录尺寸、像素格式、转换步骤与目标路径。
