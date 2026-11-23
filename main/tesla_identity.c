@@ -17,7 +17,7 @@ static bool is_vin_character(char c)
 {
     return (c >= 'A' && c <= 'H') ||
            (c >= 'J' && c <= 'N') ||
-           (c >= 'P' && c <= 'R') ||
+           (c == 'P' || c == 'R') ||
            (c >= 'S' && c <= 'Z') ||
            (c >= '0' && c <= '9');
 }
