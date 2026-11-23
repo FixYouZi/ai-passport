@@ -3,6 +3,8 @@ idf_component_register(
          "demo_navigation.c"
          "ui_pixel.c"
          "ui_pixel_math.c"
+         "tesla_identity.c"
+         "tesla_identity_esp.c"
          "demo_display.c"
          "demo_button.c"
          "demo_audio.c"
@@ -12,5 +14,5 @@ idf_component_register(
          "demo_ble.c"
          "demo_low_power.c"
     INCLUDE_DIRS "."
-    REQUIRES bsp bt esp_event esp_hw_support esp_netif esp_timer esp_wifi nvs_flash
+    REQUIRES bsp bt esp_event esp_hw_support esp_netif esp_timer esp_wifi mbedtls nvs_flash
 )
